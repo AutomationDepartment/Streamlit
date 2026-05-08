@@ -65,7 +65,6 @@ MP_CONFIG = {
     }
 }
 
-
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def get_best_month(category_path, token, mp):
     if mp != "WB":
@@ -104,12 +103,10 @@ def get_best_month(category_path, token, mp):
                         try:
                             m = int(parts[1]) if len(parts[0]) == 4 else int(parts[0])
                             return months_ru.get(m, month_val)
-                        except:
-                            pass
+                        except: pass
                     return str(month_val).capitalize()
         return "Неизвестно"
-    except Exception:
-        return "Ошибка API"
+    except Exception: return "Ошибка API"
 
 
 def normalize_score(series):
@@ -131,8 +128,11 @@ def get_best_price_pocket(category_path, target_date, token, mp):
 
     params = {
         "path": category_path,
-        "d1": d1, "d2": d2,
-        "fbs": 0, "minPrice": 500, "maxPrice": 4000
+        "d1": d1, 
+        "d2": d2,
+        "fbs": 0, 
+        "minPrice": 500, 
+        "maxPrice": 4000
     }
 
     try:
@@ -144,7 +144,7 @@ def get_best_price_pocket(category_path, target_date, token, mp):
         if not data_seg or len(data_seg) == 0: return "Нет данных", "Нет данных", "Нет данных"
 
         df_seg = pd.DataFrame(data_seg)
-
+        
         def get_col_val(r, col_est, col_base):
             v = float(r.get(col_est, 0) or 0)
             return v if v > 0 else float(r.get(col_base, 0) or 0)
@@ -156,15 +156,12 @@ def get_best_price_pocket(category_path, target_date, token, mp):
             if c in df_seg.columns:
                 df_seg[c] = pd.to_numeric(df_seg[c], errors='coerce').fillna(0)
 
-        df_seg['lost_revenue'] = (df_seg.get('lost_profit', 0) / df_seg.get('revenue', 1)).replace([np.inf, -np.inf],
-                                                                                                   0).fillna(0)
-        df_seg['efficiency_items'] = (df_seg['calc_rev'] / df_seg.get('items_with_sells', 1)).replace([np.inf, -np.inf],
-                                                                                                      0).fillna(0)
+        df_seg['lost_revenue'] = (df_seg.get('lost_profit', 0) / df_seg.get('revenue', 1)).replace([np.inf, -np.inf], 0).fillna(0)
+        df_seg['efficiency_items'] = (df_seg['calc_rev'] / df_seg.get('items_with_sells', 1)).replace([np.inf, -np.inf], 0).fillna(0)
         df_seg['average_check'] = (df_seg['calc_rev'] / df_seg['calc_sal']).replace([np.inf, -np.inf], 0).fillna(0)
-
+        
         sum_rev = df_seg['calc_rev'].sum()
-        df_seg['pocket_weight'] = (df_seg['calc_rev'] / sum_rev).replace([np.inf, -np.inf], 0).fillna(
-            0) if sum_rev > 0 else 0
+        df_seg['pocket_weight'] = (df_seg['calc_rev'] / sum_rev).replace([np.inf, -np.inf], 0).fillna(0) if sum_rev > 0 else 0
 
         eff_norm = normalize_score(df_seg['efficiency_items'])
         lost_norm = normalize_score(df_seg['lost_revenue'])
@@ -173,17 +170,15 @@ def get_best_price_pocket(category_path, target_date, token, mp):
 
         df_seg['price_score'] = (eff_norm * 0.30 + lost_norm * 0.15 + aver_norm * 0.15 + weight_norm * 0.40).round(2)
         df_seg = df_seg.sort_values(by='price_score', ascending=False)
-
+        
         pocket_col = 'range' if 'range' in df_seg.columns else 'name'
         top_pockets = [f"{name} ₽" for name in df_seg[pocket_col].head(3).tolist()]
-
+        
         while len(top_pockets) < 3: top_pockets.append("Нет данных")
         return top_pockets[0], top_pockets[1], top_pockets[2]
-    except Exception:
-        return "Ошибка расчета", "Ошибка расчета", "Ошибка расчета"
+    except Exception: return "Ошибка расчета", "Ошибка расчета", "Ошибка расчета"
 
 
-# --- ИЗМЕНЕННАЯ ФУНКЦИЯ ДЛЯ АНАЛИЗА МОНОПОЛИИ (Учет 2х лидеров) ---
 def get_monopoly_status(category_path, target_date, token, mp):
     ep = MP_CONFIG[mp]["sellers"]
     headers = {"X-Mpstats-TOKEN": token, "Content-Type": "application/json"}
@@ -220,34 +215,27 @@ def get_monopoly_status(category_path, target_date, token, mp):
         cr5 = sdf['share'].head(5).sum() if len(sdf) >= 5 else 100
         hhi = (sdf['share'] ** 2).sum()
 
-        # Достаем доли 2 и 3 места
         share_2 = sdf['share'].iloc[1] if len(sdf) > 1 else 0
         share_3 = sdf['share'].iloc[2] if len(sdf) > 2 else 0
 
-        # Новая логика (Дуополия)
         if cr1 > 30:
             leader_status = "Монополист"
         elif share_2 > 0 and (cr1 / share_2) >= 2:
             leader_status = "Есть (Один)"
         elif share_3 > 0 and (share_2 / share_3) >= 2:
             leader_status = "Два лидера"
-        elif len(sdf) == 2 and share_2 > 0:  # Защита, если в нише всего 2 продавца
+        elif len(sdf) == 2 and share_2 > 0: 
             leader_status = "Два лидера"
         else:
             leader_status = "Нет"
-
-        if cr1 > 30:
-            status = "🚨 Монополия"
-        elif hhi > 600 or cr5 > 40:
-            status = "⚠️ Высокая"
-        elif hhi >= 500:
-            status = "📊 Умеренная"
-        else:
-            status = "✅ Слабая"
+        
+        if cr1 > 30: status = "🚨 Монополия"
+        elif hhi > 600 or cr5 > 40: status = "⚠️ Высокая"
+        elif hhi >= 500: status = "📊 Умеренная"
+        else: status = "✅ Слабая"
 
         return status, leader_status, round(hhi, 0), round(cr1, 1), round(cr5, 1)
-    except:
-        return "Ошибка расчета", "Ошибка", 0, 0, 0
+    except: return "Ошибка расчета", "Ошибка", 0, 0, 0
 
 
 # --- 2. БЛОК ПОИСКА И ОСНОВНОЙ СКРИПТ ---
@@ -259,8 +247,7 @@ with st.form(key="search_form"):
     with col_mp:
         MP = st.selectbox("Маркетплейс:", ["WB", "OZ", "YM"], label_visibility="collapsed")
     with col_input:
-        CATEGORY = st.text_input("📁 Введите путь категории:", label_visibility="collapsed",
-                                 placeholder="Дом/Уборка/Швабры")
+        CATEGORY = st.text_input("📁 Введите путь категории:", label_visibility="collapsed", placeholder="Дом/Уборка/Швабры")
     with col_btn:
         search_clicked = st.form_submit_button("🚀 Найти и добавить", type="primary", use_container_width=True)
 
@@ -268,15 +255,26 @@ if search_clicked:
     if not CATEGORY:
         st.warning("⚠️ Пожалуйста, введите категорию.")
     else:
-        with st.spinner(f'Загрузка данных ({MP})...'):
+        loading_placeholder = st.empty()
+        loading_placeholder.markdown(
+            """
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 20px;">
+                <img src="https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif" width="300" style="border-radius: 15px;">
+                <h4 style="color: #666; margin-top: 15px;">Облачные хомячки крутят педали, собираем данные... 🐹☁️</h4>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+
+        with st.spinner(f'Связываемся с API {MP}...'):
             ep_trends = MP_CONFIG[MP]["trends"]
             headers = {"X-Mpstats-TOKEN": MPSTATS_TOKEN, "Content-Type": "application/json"}
             params_t = {"path": CATEGORY, "view": "itemsInCategory", "trends_by": "month"}
 
             try:
-                res_trends = requests.request(ep_trends["method"], ep_trends["url"], params=params_t, headers=headers,
-                                              timeout=30)
+                res_trends = requests.request(ep_trends["method"], ep_trends["url"], params=params_t, headers=headers, timeout=30)
                 if res_trends.status_code != 200:
+                    loading_placeholder.empty()
                     st.error(f"Ошибка API: {res_trends.status_code}")
                     st.stop()
 
@@ -285,24 +283,25 @@ if search_clicked:
                 df = pd.DataFrame(data_list)
 
                 if df.empty:
+                    loading_placeholder.empty()
                     st.error("Данные по категории не найдены.")
                     st.stop()
             except Exception as e:
+                loading_placeholder.empty()
                 st.error(f"Ошибка связи: {e}")
                 st.stop()
 
             df['date_dt'] = pd.to_datetime(df['date'], format='%Y-%m-%d', errors='coerce')
             df = df.sort_values(by='date_dt', ascending=False)
-
-
+            
             def get_row_rev(row):
                 return float(row.get('revenue_estimated', row.get('revenue', 0)) or 0)
-
-
+            
             df['rev_fallback'] = df.apply(get_row_rev, axis=1)
             valid_months = df[df['rev_fallback'] > 0]
-
+            
             if valid_months.empty:
+                loading_placeholder.empty()
                 st.error("Не найдено закрытых месяцев с выручкой > 0")
                 st.stop()
 
@@ -311,28 +310,21 @@ if search_clicked:
             row_latest = df[df['date_dt'] == latest_date]
             row_prev = df[df['date_dt'] == prev_year_date]
 
-            # --- ЗАПРОСЫ ДОП. ДАННЫХ ---
             m_status, m_leader, m_hhi, m_cr1, m_cr5 = get_monopoly_status(CATEGORY, latest_date, MPSTATS_TOKEN, MP)
             m_best_month = get_best_month(CATEGORY, MPSTATS_TOKEN, MP)
             p1, p2, p3 = get_best_price_pocket(CATEGORY, latest_date, MPSTATS_TOKEN, MP)
-
 
             def get_val(row, col):
                 try:
                     v = row[col].iloc[0]
                     return float(v) if pd.notnull(v) and str(v).strip() != '' else 0
-                except:
-                    return 0
-
+                except: return 0
 
             def get_fb(row, c1, c2):
                 v = get_val(row, c1)
                 return v if v != 0 else get_val(row, c2)
 
-
-            def growth(c, p):
-                return round(((c - p) / p * 100), 1) if p != 0 else 0
-
+            def growth(c, p): return round(((c - p) / p * 100), 1) if p != 0 else 0
 
             rev_l = get_fb(row_latest, 'revenue_estimated', 'revenue')
             rev_p = get_fb(row_prev, 'revenue_estimated', 'revenue')
@@ -379,13 +371,14 @@ if search_clicked:
                 "pockets": [p1, p2, p3]
             }
 
-            idx = next(
-                (i for (i, d) in enumerate(st.session_state.history) if d["МП"] == MP and d["Категория"] == CATEGORY),
-                None)
-            if idx is not None:
-                st.session_state.history[idx] = new_record
-            else:
-                st.session_state.history.append(new_record)
+            idx = next((i for (i, d) in enumerate(st.session_state.history) if d["МП"] == MP and d["Категория"] == CATEGORY), None)
+            if idx is not None: st.session_state.history[idx] = new_record
+            else: st.session_state.history.append(new_record)
+
+        # Убираем анимацию загрузки и запускаем шарики
+        loading_placeholder.empty()
+        st.balloons()
+
 
 # --- 3. ВЕРХНЯЯ КАРТОЧКА ---
 if st.session_state.last_search:
@@ -393,9 +386,7 @@ if st.session_state.last_search:
     r, mon = ls["rec"], ls["monopoly"]
     season, pockets = ls.get("season", "Нет данных"), ls.get("pockets", ["Нет данных", "Нет данных", "Нет данных"])
 
-
     def fmt(v): return f"{int(v):,}".replace(",", " ")
-
 
     st.success(f"✅ Аналитика ({ls['mp']}) по категории **{ls['name']}** обновлена!")
     st.subheader(f"Детально: {ls['name']} ({ls['dates']})")
@@ -459,8 +450,7 @@ if st.session_state.history:
     st.divider()
 
     st.subheader("📈 Визуальное сравнение")
-    exclude_cols = ["МП", "Категория", "Конкуренция на рынке", "Наличие лидера", "Лучший месяц", "Карман №1",
-                    "Карман №2", "Карман №3"]
+    exclude_cols = ["МП", "Категория", "Конкуренция на рынке", "Наличие лидера", "Лучший месяц", "Карман №1", "Карман №2", "Карман №3"]
     metrics_list = [c for c in history_df.columns if c not in exclude_cols]
 
     default_index = metrics_list.index("Выручка, ₽") if "Выручка, ₽" in metrics_list else 0
