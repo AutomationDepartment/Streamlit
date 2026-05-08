@@ -49,7 +49,7 @@ if not st.session_state.authenticated:
 # --- СЛОВАРИ ЭНДПОИНТОВ МАРКЕТПЛЕЙСОВ (Добавлен endpoints 'category') ---
 MP_CONFIG = {
     "WB": {
-        "category": {"url": "https://mpstats.io/api/analytics/v1/wb/category/list", "method": "GET"},
+        "category": {"url": "https://mpstats.io/api/analytics/v1/wb/category/list", "method": "POST"},
         "trends": {"url": "https://mpstats.io/api/analytics/v1/wb/category/trends", "method": "POST"},
         "sellers": {"url": "https://mpstats.io/api/analytics/v1/wb/category/sellers", "method": "POST"},
         "segmentation": {"url": "https://mpstats.io/api/analytics/v1/wb/category/price_segmentation", "method": "POST"}
