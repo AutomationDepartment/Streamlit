@@ -195,6 +195,40 @@ with col_search:
 
 selected_category = ""
 
+# Вспомогательная функция для построения дерева
+def build_tree(paths, search_term):
+    tree = {}
+    # Строим вложенный словарь
+    for path in paths:
+        parts = str(path).split('/')
+        current = tree
+        for part in parts:
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+            
+    # Рекурсивная функция для отрисовки дерева с отступами
+    def render_tree(node, prefix=""):
+        lines = []
+        for key, children in node.items():
+            # Если это конечная категория (в ней есть искомое слово)
+            is_match = search_term.lower() in key.lower() if search_term else False
+            
+            # Оформление строки
+            if not children: # Лист дерева (конечная категория)
+                icon = "🎯" if is_match else "📄"
+                bold_key = f"**{key}**" if is_match else key
+                lines.append(f"{prefix} {icon} {bold_key}")
+            else: # Папка (есть вложенные категории)
+                icon = "📂"
+                lines.append(f"{prefix} {icon} {key}")
+                # Рекурсивно отрисовываем детей с увеличенным отступом
+                lines.extend(render_tree(children, prefix + "　　")) # Используем специальный пробел для надежного отступа
+        return lines
+
+    return render_tree(tree)
+
+
 if search_kw:
     with st.spinner("Быстрый поиск категорий..."):
         df_cats = get_category_tree(MP, MPSTATS_TOKEN)
@@ -203,31 +237,27 @@ if search_kw:
         # Универсальный поиск колонки с названием пути (зависит от МП)
         path_col = 'path' if 'path' in df_cats.columns else ('name' if 'name' in df_cats.columns else 'category_name')
         
-        # Фильтруем таблицу по вхождению слова
-        filtered = df_cats[df_cats[path_col].str.contains(search_kw, case=False, na=False)]
+        # Находим все пути, содержащие искомое слово
+        filtered_paths = df_cats[df_cats[path_col].str.contains(search_kw, case=False, na=False)][path_col].tolist()
         
-        if not filtered.empty:
-            # Сортируем по выручке, чтобы крупнейшие категории были сверху
-            if 'revenue' in filtered.columns:
-                filtered['revenue'] = pd.to_numeric(filtered['revenue'], errors='coerce').fillna(0)
-                filtered = filtered.sort_values(by='revenue', ascending=False)
+        if filtered_paths:
+            st.success(f"Найдено совпадений: {len(filtered_paths)}")
             
-            st.success(f"Найдено совпадений: {len(filtered)}")
+            # --- РИСУЕМ ДЕРЕВО ---
+            st.markdown("#### Иерархия категорий:")
+            tree_lines = build_tree(filtered_paths, search_kw)
             
-            # Выводим красивую табличку (выбираем нужные колонки, если они есть в API)
-            display_cols = [path_col]
-            for c in ['revenue', 'sales', 'items', 'sellers']:
-                if c in filtered.columns: display_cols.append(c)
+            # Выводим дерево в специальном блоке, чтобы отступы не ломались
+            st.markdown(
+                "<div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; font-family: monospace; line-height: 1.8; max-height: 400px; overflow-y: auto;'>" + 
+                "<br>".join(tree_lines) + 
+                "</div>", 
+                unsafe_allow_html=True
+            )
+            st.write("") # Отступ
             
-            # Форматируем числа для красоты
-            disp_df = filtered[display_cols].copy()
-            for c in display_cols[1:]:
-                disp_df[c] = disp_df[c].apply(lambda x: f"{int(float(x)):,}".replace(",", " ") if pd.notnull(x) else "-")
-            
-            st.dataframe(disp_df, use_container_width=True, hide_index=True, height=400)
-            
-            # Предлагаем выбрать нужную категорию из списка
-            selected_category = st.selectbox("🎯 Выберите категорию для сканирования:", filtered[path_col].tolist())
+            # Предлагаем выбрать нужную категорию из списка (оставляем полный путь для API)
+            selected_category = st.selectbox("🎯 Выберите полный путь для сканирования:", sorted(filtered_paths))
         else:
             st.warning(f"Категорий со словом '{search_kw}' на {MP} не найдено.")
             selected_category = st.text_input("Ввести путь вручную:", placeholder="Дом/Уборка/Швабры")
