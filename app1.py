@@ -19,12 +19,21 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# Инициализация переменных сессии
 if 'history' not in st.session_state:
     st.session_state.history = []
 if 'last_search' not in st.session_state:
     st.session_state.last_search = None
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
+
+# Память для скрытия таблицы после выбора
+if 'confirmed_category' not in st.session_state:
+    st.session_state.confirmed_category = None
+if 'last_search_kw' not in st.session_state:
+    st.session_state.last_search_kw = ""
+if 'last_mp' not in st.session_state:
+    st.session_state.last_mp = "WB"
 
 try:
     MPSTATS_TOKEN = st.secrets.get("MPSTATS_TOKEN", os.getenv("MPSTATS_TOKEN"))
@@ -213,57 +222,81 @@ with col_mp:
 with col_search:
     search_kw = st.text_input("Введите слово (например, Брюки) для поиска:", placeholder="Оставьте пустым, если уже знаете точный путь...")
 
+# Автоматически сбрасываем выбор, если пользователь поменял маркетплейс или слово в поиске
+if MP != st.session_state.last_mp or search_kw != st.session_state.last_search_kw:
+    st.session_state.confirmed_category = None
+    st.session_state.last_mp = MP
+    st.session_state.last_search_kw = search_kw
+
 selected_category = ""
 
-if search_kw:
-    with st.spinner("Быстрый поиск категорий..."):
-        df_cats = get_category_tree(MP, MPSTATS_TOKEN)
-        
-    if not df_cats.empty:
-        path_col = 'path' if 'path' in df_cats.columns else ('name' if 'name' in df_cats.columns else 'category_name')
-        filtered = df_cats[df_cats[path_col].str.contains(search_kw, case=False, na=False)]
-        
-        if not filtered.empty:
-            if 'revenue' in filtered.columns:
-                filtered['revenue'] = pd.to_numeric(filtered['revenue'], errors='coerce').fillna(0)
-                filtered = filtered.sort_values(by='revenue', ascending=False)
+# ЛОГИКА ОТОБРАЖЕНИЯ: Если категория УЖЕ выбрана из таблицы -> прячем таблицу
+if st.session_state.confirmed_category:
+    st.write("") # Небольшой отступ
+    col_msg, col_btn = st.columns([4, 1])
+    with col_msg:
+        st.success(f"✅ Выбрана категория: **{st.session_state.confirmed_category}**")
+    with col_btn:
+        if st.button("🔄 Выбрать другую", use_container_width=True):
+            st.session_state.confirmed_category = None
+            st.rerun()
             
-            display_cols = [path_col]
-            for c in ['revenue', 'sales', 'items', 'sellers']:
-                if c in filtered.columns: display_cols.append(c)
-            
-            disp_df = filtered[display_cols].copy()
-            for c in display_cols[1:]:
-                disp_df[c] = disp_df[c].apply(lambda x: f"{int(float(x)):,}".replace(",", " ") if pd.notnull(x) else "-")
-            
-            st.markdown("👇 **Кликните на любую строку в таблице**, чтобы выбрать категорию:")
-            
-            event = st.dataframe(
-                disp_df, 
-                use_container_width=True, 
-                hide_index=True, 
-                height=400,
-                on_select="rerun",          
-                selection_mode="single-row" 
-            )
-            
-            if event.selection.rows:
-                selected_idx = event.selection.rows[0]
-                selected_category = disp_df.iloc[selected_idx][path_col]
-            else:
-                selected_category = st.selectbox("Или выберите из выпадающего списка:", filtered[path_col].tolist())
-        else:
-            st.warning(f"Категорий со словом '{search_kw}' на {MP} не найдено.")
-            selected_category = st.text_input("Ввести путь вручную:", placeholder="Дом/Уборка/Швабры")
+    selected_category = st.session_state.confirmed_category
+
+# ЛОГИКА ОТОБРАЖЕНИЯ: Если категория ЕЩЕ НЕ выбрана -> показываем поиск и таблицу
 else:
-    selected_category = st.text_input("🎯 Точный путь категории (если знаете):", placeholder="Дом/Уборка/Швабры")
+    if search_kw:
+        with st.spinner("Быстрый поиск категорий..."):
+            df_cats = get_category_tree(MP, MPSTATS_TOKEN)
+            
+        if not df_cats.empty:
+            path_col = 'path' if 'path' in df_cats.columns else ('name' if 'name' in df_cats.columns else 'category_name')
+            filtered = df_cats[df_cats[path_col].str.contains(search_kw, case=False, na=False)]
+            
+            if not filtered.empty:
+                if 'revenue' in filtered.columns:
+                    filtered['revenue'] = pd.to_numeric(filtered['revenue'], errors='coerce').fillna(0)
+                    filtered = filtered.sort_values(by='revenue', ascending=False)
+                
+                display_cols = [path_col]
+                for c in ['revenue', 'sales', 'items', 'sellers']:
+                    if c in filtered.columns: display_cols.append(c)
+                
+                disp_df = filtered[display_cols].copy()
+                for c in display_cols[1:]:
+                    disp_df[c] = disp_df[c].apply(lambda x: f"{int(float(x)):,}".replace(",", " ") if pd.notnull(x) else "-")
+                
+                st.markdown("👇 **Кликните на любую строку в таблице**, чтобы выбрать категорию:")
+                
+                event = st.dataframe(
+                    disp_df, 
+                    use_container_width=True, 
+                    hide_index=True, 
+                    height=400,
+                    on_select="rerun",          
+                    selection_mode="single-row" 
+                )
+                
+                # Если пользователь кликнул по строке в таблице
+                if event.selection.rows:
+                    selected_idx = event.selection.rows[0]
+                    # Сохраняем в память и перезапускаем скрипт, чтобы скрыть таблицу
+                    st.session_state.confirmed_category = disp_df.iloc[selected_idx][path_col]
+                    st.rerun()
+                else:
+                    selected_category = st.selectbox("Или выберите из выпадающего списка:", filtered[path_col].tolist())
+            else:
+                st.warning(f"Категорий со словом '{search_kw}' на {MP} не найдено.")
+                selected_category = st.text_input("Ввести путь вручную:", placeholder="Дом/Уборка/Швабры")
+    else:
+        selected_category = st.text_input("🎯 Точный путь категории (если знаете):", placeholder="Дом/Уборка/Швабры")
 
 
 # --- КНОПКА АНАЛИЗА СРАЗУ ПОД ВЫБОРОМ ---
 search_clicked = False
 if selected_category:
     st.write("") # Небольшой отступ
-    search_clicked = st.button("🚀 Анализировать выбранную категорию", type="primary", use_container_width=True)
+    search_clicked = st.button(f"🚀 Анализировать: {selected_category.split('/')[-1]}", type="primary", use_container_width=True)
 
 if search_clicked:
     CATEGORY = selected_category
@@ -486,9 +519,10 @@ with st.expander("ℹ️ Справка: Описание и формулы ра
 
     ### 🕵️‍♂️ Анализ монополии и конкуренции
     Расчет производится на основе данных по первым 200 продавцам (селлерам) в категории за выбранный месяц.
-    * **Конкуренция на рынке:** * **✅ Слабая:** HHI < 500. Рынок свободен.
+    * **Конкуренция на рынке:** 
+        * **✅ Слабая:** HHI < 500. Рынок свободен.
         * **📊 Умеренная:** 500 < HHI < 600. Начинают формироваться лидеры.
-        * **⚠️ Высокая:** HHI > 600 или CR5 > 40. Категория перегрета сильными брендами.
+        * **⚠️ Высокая:** HHI > 600 или CR5 > 40. Категория перегрета сильными продавцами.
         * **🚨 Монополия:** Доля одного продавца больше 30%.
     * **Наличие лидера:**
         * **Монополист:** Доля Топ-1 больше 30%.
