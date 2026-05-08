@@ -377,7 +377,7 @@ if search_clicked:
 
         # Убираем анимацию загрузки и запускаем шарики
         loading_placeholder.empty()
-        st.balloons()
+        #st.balloons()
 
 
 # --- 3. ВЕРХНЯЯ КАРТОЧКА ---
