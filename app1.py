@@ -55,13 +55,13 @@ MP_CONFIG = {
         "segmentation": {"url": "https://mpstats.io/api/analytics/v1/wb/category/price_segmentation", "method": "POST"}
     },
     "OZ": {
-        "category": {"url": "https://mpstats.io/api/analytics/v1/oz/category/list", "method": "GET"},
+        "category": {"url": "https://mpstats.io/api/analytics/v1/oz/category/list", "method": "POST"},
         "trends": {"url": "https://mpstats.io/api/analytics/v1/oz/category/trends", "method": "POST"},
         "sellers": {"url": "https://mpstats.io/api/analytics/v1/oz/category/sellers", "method": "POST"},
         "segmentation": {"url": "https://mpstats.io/api/analytics/v1/oz/category/price_segmentation", "method": "POST"}
     },
     "YM": {
-        "category": {"url": "https://mpstats.io/api/ym/rubricator", "method": "GET"},
+        "category": {"url": "https://mpstats.io/api/ym/rubricator", "method": "POST"},
         "trends": {"url": "https://mpstats.io/api/ym/get/category/trends", "method": "GET"},
         "sellers": {"url": "https://mpstats.io/api/ym/get/category/sellers", "method": "GET"},
         "segmentation": {"url": "https://mpstats.io/api/ym/get/category/price_segmentation", "method": "GET"}
@@ -75,8 +75,14 @@ def get_category_tree(mp, token):
     if not ep: return pd.DataFrame()
     
     headers = {"X-Mpstats-TOKEN": token, "Content-Type": "application/json"}
+    
+    # Вычисляем последний день прошлого месяца для параметра date
+    last_day_prev_month = (pd.Timestamp.now().replace(day=1) - pd.DateOffset(days=1)).strftime('%Y-%m-%d')
+    params = {"date": last_day_prev_month}
+    
     try:
-        res = requests.request(ep["method"], ep["url"], headers=headers, timeout=15)
+        # Для POST-запросов MPStats обязательно нужен параметр json={}
+        res = requests.request(ep["method"], ep["url"], params=params, json={}, headers=headers, timeout=15)
         if res.status_code == 200:
             data = res.json()
             items = data.get("data", data) if isinstance(data, dict) else data
