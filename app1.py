@@ -224,7 +224,7 @@ if search_kw:
             for c in display_cols[1:]:
                 disp_df[c] = disp_df[c].apply(lambda x: f"{int(float(x)):,}".replace(",", " ") if pd.notnull(x) else "-")
             
-            st.dataframe(disp_df.head(15), use_container_width=True, hide_index=True)
+            st.dataframe(disp_df, use_container_width=True, hide_index=True, height=400)
             
             # Предлагаем выбрать нужную категорию из списка
             selected_category = st.selectbox("🎯 Выберите категорию для сканирования:", filtered[path_col].tolist())
