@@ -92,37 +92,51 @@ def get_category_tree(mp, token):
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def get_best_month(category_path, token, mp):
-    if mp != "WB": return "Нет данных"
+    if mp != "WB":
+        return "Нет данных"
+
     URL = "https://mpstats.io/api/analytics/v1/wb/category/season_effects/annual"
     headers = {"X-Mpstats-TOKEN": token, "Content-Type": "application/json"}
+    params = {"path": category_path, "period": "month"}
+
     try:
-        res = requests.get(URL, params={"path": category_path, "period": "month"}, headers=headers, timeout=30)
-        items = res.json().get("data", res.json()) if isinstance(res.json(), dict) else res.json()
-        if not items: return "Нет данных"
+        res = requests.get(URL, params=params, headers=headers, timeout=30)
+        data = res.json()
+        items = data.get("data", data) if isinstance(data, dict) else data
+
+        if not items or len(items) == 0: return "Нет данных"
+
         df = pd.DataFrame(items)
-        
-        # Обновленный "бронированный" парсер сезонности
-        rev_col = next((c for c in ['yearly_revenue', 'revenue', 'sales'] if c in df.columns), None)
-        if rev_col:
-            df[rev_col] = pd.to_numeric(df[rev_col], errors='coerce').fillna(0)
-            best_row = df.loc[df[rev_col].idxmax()]
-            months_ru = {1: "❄️ Янв", 2: "❄️ Фев", 3: "🌷 Мар", 4: "🌷 Апр", 5: "🌷 Май", 6: "☀️ Июн", 7: "☀️ Июл", 8: "☀️ Авг", 9: "🍂 Сен", 10: "🍂 Окт", 11: "🍂 Ноя", 12: "❄️ Дек"}
-            m_val = best_row.get('month', best_row.get('date', best_row.get('name')))
-            try:
-                m_str = str(m_val)
-                if '-' in m_str: # Если дата вида "2023-05"
-                    m_int = int(m_str.split('-')[1])
-                else: # Если просто цифра "5"
-                    m_int = int(float(m_str))
-                return months_ru.get(m_int, m_str)
-            except:
-                return str(m_val)
+        if 'yearly_revenue' in df.columns:
+            df['yearly_revenue'] = pd.to_numeric(df['yearly_revenue'], errors='coerce').fillna(0)
+            best_row = df.loc[df['yearly_revenue'].idxmax()]
+
+            months_ru = {
+                1: "❄️ Январь", 2: "❄️ Февраль", 3: "🌷 Март", 4: "🌷 Апрель",
+                5: "🌷 Май", 6: "☀️ Июнь", 7: "☀️ Июль", 8: "☀️ Август",
+                9: "🍂 Сентябрь", 10: "🍂 Октябрь", 11: "🍂 Ноябрь", 12: "❄️ Декабрь"
+            }
+
+            month_val = best_row.get('date', best_row.get('month', best_row.get('name')))
+
+            if pd.notnull(month_val):
+                try:
+                    return months_ru.get(int(month_val), str(month_val))
+                except:
+                    if isinstance(month_val, str) and "-" in month_val:
+                        parts = month_val.split("-")
+                        try:
+                            m = int(parts[1]) if len(parts[0]) == 4 else int(parts[0])
+                            return months_ru.get(m, month_val)
+                        except: pass
+                    return str(month_val).capitalize()
         return "Неизвестно"
-    except: return "Ошибка API"
+    except Exception: return "Ошибка API"
 
 def normalize_score(series):
-    if series.min() == series.max(): return pd.Series([0]*len(series), index=series.index)
-    return (series - series.min()) / (series.max() - series.min())
+    s_min, s_max = series.min(), series.max()
+    if s_min == s_max: return pd.Series([0]*len(series), index=series.index)
+    return (series - s_min) / (s_max - s_min)
 
 def get_best_price_pocket(category_path, target_date, token, mp):
     ep = MP_CONFIG[mp].get("segmentation")
@@ -191,7 +205,6 @@ def get_monopoly_status(category_path, target_date, token, mp):
 
 # --- 2. ИНТЕРФЕЙС И ОСНОВНОЙ СКРИПТ ---
 st.title("📊 Аналитика и сравнение категорий MPStats")
-st.info("⚠️ Запрос глубокой аналитики тратит **2 лимита** MPStats. Поиск по списку бесплатен.")
 
 # --- ЕДИНЫЙ БЛОК НАВИГАЦИИ И АНАЛИЗА ---
 col_mp, col_search = st.columns([1, 4])
@@ -249,9 +262,8 @@ else:
 # --- КНОПКА АНАЛИЗА СРАЗУ ПОД ВЫБОРОМ ---
 search_clicked = False
 if selected_category:
-    st.write("") # Небольшой отступ для красоты
-    btn_label = f"🚀 Анализировать: {selected_category.split('/')[-1]}"
-    search_clicked = st.button(btn_label, type="primary", use_container_width=True)
+    st.write("") # Небольшой отступ
+    search_clicked = st.button("🚀 Анализировать выбранную категорию", type="primary", use_container_width=True)
 
 if search_clicked:
     CATEGORY = selected_category
@@ -460,3 +472,34 @@ if st.session_state.history:
     )
     fig.update_layout(xaxis_title="", yaxis_title=selected_metric, xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
+
+# --- 6. СПРАВКА ---
+st.divider()
+with st.expander("ℹ️ Справка: Описание и формулы расчета метрик"):
+    st.markdown("""
+    ### 💰 Финансовые показатели
+    * **Выручка (₽):** Выкупы в рублях за месяц (`revenue_estimated`). Если данных нет (например, на OZ), берется выручка (`revenue`).
+    * **Продажи (шт):** Выкупы в штуках за месяц (`sales_estimated`). Если их нет, берутся продажи (`sales`).
+    * **Товары с продажами:** Количество уникальных карточек товара, у которых была хотя бы одна продажа за месяц.
+    * **Сред. выручка/товар (₽):** `Выручка ÷ Товары с продажами`. 
+    * **Средний чек (₽):** `Выручка ÷ Продажи`.
+
+    ### 🕵️‍♂️ Анализ монополии и конкуренции
+    Расчет производится на основе данных по первым 200 продавцам (селлерам) в категории за выбранный месяц.
+    * **Конкуренция на рынке:** * **✅ Слабая:** HHI < 500. Рынок свободен.
+        * **📊 Умеренная:** 500 < HHI < 600. Начинают формироваться лидеры.
+        * **⚠️ Высокая:** HHI > 600 или CR5 > 40. Категория перегрета сильными брендами.
+        * **🚨 Монополия:** Доля одного продавца больше 30%.
+    * **Наличие лидера:**
+        * **Монополист:** Доля Топ-1 больше 30%.
+        * **Есть (Один):** Топ-1 больше Топ-2 в 2 и более раз.
+        * **Два лидера:** Топ-2 больше Топ-3 в 2 и более раз (дуополия).
+    * **Индекс HHI (Индекс Херфиндаля-Хиршмана):** Экономический показатель концентрации рынка. Считается как сумма квадратов рыночных долей (в процентах) всех продавцов в категории. 
+    * **Доля лидера (CR1):** Процент всей выручки категории, который забирает себе продавец №1. 
+    * **Доля ТОП-5 (CR5):** Если 5 крупнейших селлеров суммарно забирают более 40% рынка, конкуренция автоматически признается высокой.
+
+    ### 🔗 Дополнительные показатели (Ценовые карманы считаются для всех маркетплейсов, сезонность только для WB)
+    * **Пик сезона:** Исторически лучший месяц в категории с максимальной выручкой.
+    * **Карман №1, №2, №3:** Топ-3 самых выгодных ценовых диапазона. 
+        Итоговый коэффициент = Доля выручки кармана * 0,4 + Эффективность товара * 0,3 + Упущенная выручка * 0,15 + Средний чек * 0,15.
+    """)
