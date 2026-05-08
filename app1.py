@@ -46,7 +46,7 @@ if not st.session_state.authenticated:
         st.warning("Неверный пароль. Доступ закрыт.")
     st.stop()
 
-# --- СЛОВАРИ ЭНДПОИНТОВ МАРКЕТПЛЕЙСОВ (Добавлен endpoints 'category') ---
+# --- СЛОВАРИ ЭНДПОИНТОВ МАРКЕТПЛЕЙСОВ ---
 MP_CONFIG = {
     "WB": {
         "category": {"url": "https://mpstats.io/api/analytics/v1/wb/category/list", "method": "POST"},
@@ -69,19 +69,16 @@ MP_CONFIG = {
 }
 
 # --- КЭШИРОВАННАЯ ФУНКЦИЯ ДЛЯ БЫСТРОГО ПОИСКА КАТЕГОРИЙ ---
-@st.cache_data(ttl=3600, show_spinner=False) # Кэшируем дерево на 1 час
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_category_tree(mp, token):
     ep = MP_CONFIG[mp].get("category")
     if not ep: return pd.DataFrame()
     
     headers = {"X-Mpstats-TOKEN": token, "Content-Type": "application/json"}
-    
-    # Вычисляем последний день прошлого месяца для параметра date
     last_day_prev_month = (pd.Timestamp.now().replace(day=1) - pd.DateOffset(days=1)).strftime('%Y-%m-%d')
     params = {"date": last_day_prev_month}
     
     try:
-        # Для POST-запросов MPStats обязательно нужен параметр json={}
         res = requests.request(ep["method"], ep["url"], params=params, json={}, headers=headers, timeout=15)
         if res.status_code == 200:
             data = res.json()
@@ -93,7 +90,7 @@ def get_category_tree(mp, token):
         pass
     return pd.DataFrame()
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ (Остались без изменений) ---
+# --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
 def get_best_month(category_path, token, mp):
     if mp != "WB": return "Нет данных"
     URL = "https://mpstats.io/api/analytics/v1/wb/category/season_effects/annual"
@@ -181,88 +178,68 @@ def get_monopoly_status(category_path, target_date, token, mp):
         return status, leader_status, round(hhi, 0), round(cr1, 1), round(cr5, 1)
     except: return "Ошибка", "Ошибка", 0, 0, 0
 
+
 # --- 2. ИНТЕРФЕЙС И ОСНОВНОЙ СКРИПТ ---
 st.title("📊 Аналитика и сравнение категорий MPStats")
-st.info("⚠️ Запрос глубокой аналитики тратит **2 лимита** MPStats. Поиск по дереву (Шаг 1) бесплатен.")
+st.info("⚠️ Запрос глубокой аналитики тратит **2 лимита** MPStats. Поиск по списку (Шаг 1) бесплатен.")
 
-# --- ШАГ 1: ВСТРОЕННЫЙ ПОИСК ---
+# --- ШАГ 1: ВСТРОЕННЫЙ ПОИСК (ТАБЛИЦА) ---
 st.markdown("### 🔍 Шаг 1. Навигатор по категориям")
 col_mp, col_search = st.columns([1, 4])
 with col_mp:
     MP = st.selectbox("Маркетплейс:", ["WB", "OZ", "YM"])
 with col_search:
-    search_kw = st.text_input("Введите слово (например, Брюки) для поиска по дереву:", placeholder="Оставьте пустым, если уже знаете точный путь...")
+    search_kw = st.text_input("Введите слово (например, Брюки) для поиска:", placeholder="Оставьте пустым, если уже знаете точный путь...")
 
 selected_category = ""
-
-# Вспомогательная функция для построения дерева
-def build_tree(paths, search_term):
-    tree = {}
-    # Строим вложенный словарь
-    for path in paths:
-        parts = str(path).split('/')
-        current = tree
-        for part in parts:
-            if part not in current:
-                current[part] = {}
-            current = current[part]
-            
-    # Рекурсивная функция для отрисовки дерева с отступами
-    def render_tree(node, prefix=""):
-        lines = []
-        for key, children in node.items():
-            # Если это конечная категория (в ней есть искомое слово)
-            is_match = search_term.lower() in key.lower() if search_term else False
-            
-            # Оформление строки
-            if not children: # Лист дерева (конечная категория)
-                icon = "🎯" if is_match else "📄"
-                bold_key = f"**{key}**" if is_match else key
-                lines.append(f"{prefix} {icon} {bold_key}")
-            else: # Папка (есть вложенные категории)
-                icon = "📂"
-                lines.append(f"{prefix} {icon} {key}")
-                # Рекурсивно отрисовываем детей с увеличенным отступом
-                lines.extend(render_tree(children, prefix + "　　")) # Используем специальный пробел для надежного отступа
-        return lines
-
-    return render_tree(tree)
-
 
 if search_kw:
     with st.spinner("Быстрый поиск категорий..."):
         df_cats = get_category_tree(MP, MPSTATS_TOKEN)
         
     if not df_cats.empty:
-        # Универсальный поиск колонки с названием пути (зависит от МП)
         path_col = 'path' if 'path' in df_cats.columns else ('name' if 'name' in df_cats.columns else 'category_name')
+        filtered = df_cats[df_cats[path_col].str.contains(search_kw, case=False, na=False)]
         
-        # Находим все пути, содержащие искомое слово
-        filtered_paths = df_cats[df_cats[path_col].str.contains(search_kw, case=False, na=False)][path_col].tolist()
-        
-        if filtered_paths:
-            st.success(f"Найдено совпадений: {len(filtered_paths)}")
+        if not filtered.empty:
+            if 'revenue' in filtered.columns:
+                filtered['revenue'] = pd.to_numeric(filtered['revenue'], errors='coerce').fillna(0)
+                filtered = filtered.sort_values(by='revenue', ascending=False)
             
-            # --- РИСУЕМ ДЕРЕВО ---
-            st.markdown("#### Иерархия категорий:")
-            tree_lines = build_tree(filtered_paths, search_kw)
+            st.success(f"Найдено совпадений: {len(filtered)}")
             
-            # Выводим дерево в специальном блоке, чтобы отступы не ломались
-            st.markdown(
-                "<div style='background-color: #f0f2f6; padding: 15px; border-radius: 10px; font-family: monospace; line-height: 1.8; max-height: 400px; overflow-y: auto;'>" + 
-                "<br>".join(tree_lines) + 
-                "</div>", 
-                unsafe_allow_html=True
+            display_cols = [path_col]
+            for c in ['revenue', 'sales', 'items', 'sellers']:
+                if c in filtered.columns: display_cols.append(c)
+            
+            disp_df = filtered[display_cols].copy()
+            for c in display_cols[1:]:
+                disp_df[c] = disp_df[c].apply(lambda x: f"{int(float(x)):,}".replace(",", " ") if pd.notnull(x) else "-")
+            
+            st.markdown("👇 **Кликните на любую строку в таблице**, чтобы выбрать категорию:")
+            
+            # --- ИНТЕРАКТИВНАЯ ТАБЛИЦА С КЛИКАБЕЛЬНЫМИ СТРОКАМИ ---
+            event = st.dataframe(
+                disp_df, 
+                use_container_width=True, 
+                hide_index=True, 
+                height=400,
+                on_select="rerun",          # Перезагружает страницу при клике
+                selection_mode="single-row" # Позволяет выбрать только одну строку
             )
-            st.write("") # Отступ
             
-            # Предлагаем выбрать нужную категорию из списка (оставляем полный путь для API)
-            selected_category = st.selectbox("🎯 Выберите полный путь для сканирования:", sorted(filtered_paths))
+            if event.selection.rows:
+                # Если пользователь кликнул на строку, забираем индекс и находим путь
+                selected_idx = event.selection.rows[0]
+                selected_category = disp_df.iloc[selected_idx][path_col]
+                st.info(f"✅ Выбрана категория: **{selected_category}**\n\nМожете нажимать кнопку анализа ниже!")
+            else:
+                # Запасной вариант (selectbox) на случай, если пользователь не хочет кликать в таблицу
+                selected_category = st.selectbox("Или выберите из выпадающего списка:", filtered[path_col].tolist())
         else:
             st.warning(f"Категорий со словом '{search_kw}' на {MP} не найдено.")
             selected_category = st.text_input("Ввести путь вручную:", placeholder="Дом/Уборка/Швабры")
 else:
-    # Если строка поиска пуста, даем возможность ввести путь руками
     selected_category = st.text_input("🎯 Точный путь категории (если знаете):", placeholder="Дом/Уборка/Швабры")
 
 st.divider()
@@ -276,7 +253,18 @@ if search_clicked:
         st.warning("⚠️ Сначала выберите или введите категорию.")
     else:
         CATEGORY = selected_category
-        with st.spinner(f'Связываемся с API {MP} и собираем метрики...'):
+        loading_placeholder = st.empty()
+        loading_placeholder.markdown(
+            """
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 20px;">
+                <img src="https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif" width="300" style="border-radius: 15px;">
+                <h4 style="color: #666; margin-top: 15px;">Облачные хомячки крутят педали, собираем данные... 🐹☁️</h4>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+
+        with st.spinner(f'Связываемся с API {MP}...'):
             ep_trends = MP_CONFIG[MP]["trends"]
             headers = {"X-Mpstats-TOKEN": MPSTATS_TOKEN, "Content-Type": "application/json"}
             params_t = {"path": CATEGORY, "view": "itemsInCategory", "trends_by": "month"}
@@ -284,6 +272,7 @@ if search_clicked:
             try:
                 res_trends = requests.request(ep_trends["method"], ep_trends["url"], params=params_t, headers=headers, timeout=30)
                 if res_trends.status_code != 200:
+                    loading_placeholder.empty()
                     st.error(f"Ошибка API: {res_trends.status_code}")
                     st.stop()
 
@@ -292,9 +281,11 @@ if search_clicked:
                 df = pd.DataFrame(data_list)
 
                 if df.empty:
-                    st.error("Данные по трендам не найдены. Возможно, путь неточный.")
+                    loading_placeholder.empty()
+                    st.error("Данные по категории не найдены.")
                     st.stop()
             except Exception as e:
+                loading_placeholder.empty()
                 st.error(f"Ошибка связи: {e}")
                 st.stop()
 
@@ -308,6 +299,7 @@ if search_clicked:
             valid_months = df[df['rev_fallback'] > 0]
             
             if valid_months.empty:
+                loading_placeholder.empty()
                 st.error("Не найдено закрытых месяцев с выручкой > 0")
                 st.stop()
 
@@ -380,6 +372,9 @@ if search_clicked:
             idx = next((i for (i, d) in enumerate(st.session_state.history) if d["МП"] == MP and d["Категория"] == CATEGORY), None)
             if idx is not None: st.session_state.history[idx] = new_record
             else: st.session_state.history.append(new_record)
+
+        # Убираем анимацию загрузки (и больше никаких шариков!)
+        loading_placeholder.empty()
 
 
 # --- 3. ВЕРХНЯЯ КАРТОЧКА ---
@@ -465,3 +460,33 @@ if st.session_state.history:
     )
     fig.update_layout(xaxis_title="", yaxis_title=selected_metric, xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
+
+# --- 6. СПРАВКА ---
+st.divider()
+with st.expander("ℹ️ Справка: Описание и формулы расчета метрик"):
+    st.markdown("""
+    ### 💰 Финансовые показатели
+    * **Выручка (₽):** Выкупы в рублях за месяц (`revenue_estimated`). Если данных нет (например, на OZ), берется выручка (`revenue`).
+    * **Продажи (шт):** Выкупы в штуках за месяц (`sales_estimated`). Если их нет, берутся продажи (`sales`).
+    * **Товары с продажами:** Количество уникальных карточек товара, у которых была хотя бы одна продажа за месяц.
+    * **Сред. выручка/товар (₽):** `Выручка ÷ Товары с продажами`. 
+    * **Средний чек (₽):** `Выручка ÷ Продажи`.
+
+    ### 🕵️‍♂️ Анализ монополии и конкуренции
+    Расчет производится на основе данных по первым 200 продавцам (селлерам) в категории за выбранный месяц.
+    * **Конкуренция на рынке:** * **✅ Слабая:** HHI < 500. Рынок свободен.
+        * **📊 Умеренная:** 500 < HHI < 600. Начинают формироваться лидеры.
+        * **⚠️ Высокая:** HHI > 600 или CR5 > 40. Категория перегрета сильными брендами.
+        * **🚨 Монополия:** Доля одного продавца больше 30%.
+    * **Наличие лидера:**
+        * **Монополист:** Доля Топ-1 больше 30%.
+        * **Есть (Один):** Топ-1 больше Топ-2 в 2 и более раз.
+        * **Два лидера:** Топ-2 больше Топ-3 в 2 и более раз (дуополия).
+    * **Индекс HHI (Индекс Херфиндаля-Хиршмана):** Экономический показатель концентрации рынка. Считается как сумма квадратов рыночных долей (в процентах) всех продавцов в категории. 
+    * **Доля лидера (CR1):** Процент всей выручки категории, который забирает себе продавец №1. 
+    * **Доля ТОП-5 (CR5):** Если 5 крупнейших селлеров суммарно забирают более 40% рынка, конкуренция автоматически признается высокой.
+
+    ### 🔗 Дополнительные показатели (Ценовые карманы считаются для всех маркетплейсов, сезонность только для WB)
+    * **Пик сезона:** Исторически лучший месяц в категории с максимальной выручкой.
+    * **Карман №1, №2, №3:** Топ-3 самых выгодных ценовых диапазона. Итоговый коэффициент = Доля выручки кармана * 0,4 + Эффективность товара * 0,3 + Упущенная выручка * 0,15 + Средний чек * 0,15.
+    """)
